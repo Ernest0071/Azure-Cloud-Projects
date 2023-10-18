@@ -1,0 +1,12 @@
+# Local .terraform directories
+**/.terraform/*
+*.terraform.*
+kubeconfig
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# Crash log files
+crash.log

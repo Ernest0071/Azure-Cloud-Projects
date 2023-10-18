@@ -1,0 +1,75 @@
+name: Terraform Workflow
+
+on:
+  workflow_dispatch: # Manually trigger the workflow
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up SSH key
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PUBLIC_KEY }}" > ~/.ssh/host_key.pub
+        chmod 600 ~/.ssh/host_key.pub
+
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v1
+      with:
+        terraform_version: latest # Use the latest Terraform version
+
+    - name: Initialize Terraform
+      run: terraform init
+
+    - name: Validate Terraform
+      run: terraform validate
+
+    - name: Apply Terraform
+      run: |
+        terraform apply -auto-approve || (echo "Terraform apply failed, destroying resources" && terraform destroy -auto-approve)
+
+    - name: Export KUBECONFIG
+      run: |
+        sudo mkdir -p ~/.kube/
+        sudo mv ./kubeconfig ~/.kube/config
+
+    - name: Install jq
+      run: sudo apt-get install jq -y
+
+    - name: Create ArgoCD Namespace
+      run: kubectl create namespace argocd
+  
+    - name: Install ArgoCD
+      run: kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+    - name: Patch ArgoCD Service
+      run: kubectl patch svc argocd-server -n argocd -p '{"spec":{"type":"LoadBalancer"}}'
+      
+    - name: Export ARGOCD_SERVER IP
+      run: |
+        export ARGOCD_SERVER=`kubectl get svc argocd-server -n argocd -o json | jq --raw-output '.status.loadBalancer.ingress[0].ip'`
+        echo "ARGOCD_SERVER IP: $ARGOCD_SERVER"
+
+    - name: Export ARGOCD_SERVER PASSWORD
+      run: |
+        export ARGOCD_PASSWORD=`kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d`
+        echo "ARGOCD_SERVER PASSWORD: $ARGOCD_PASSWORD"
+
+    - name: Kubectl Apply Manifest File
+      run: |
+        kubectl apply -f=argocd-sync.yaml
+
+    - name: Kubectl get services
+      run: |
+        kubectl get svc -n todo-app
+
